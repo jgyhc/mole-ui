@@ -8,6 +8,8 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
     case uninstall
     case purge
     case installers
+    case homebrew
+    case nodePackages
     case fvm
     case gradle
     case analyze
@@ -23,6 +25,8 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
         case .uninstall: "智能卸载"
         case .purge: "项目产物清理"
         case .installers: "安装包清理"
+        case .homebrew: "Homebrew 管理"
+        case .nodePackages: "Node 软件包管理"
         case .fvm: "Flutter SDK 清理"
         case .gradle: "Gradle 版本清理"
         case .analyze: "磁盘分析"
@@ -39,6 +43,8 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
         case .uninstall: "trash"
         case .purge: "hammer.fill"
         case .installers: "doc.badge.arrow.up"
+        case .homebrew: "mug.fill"
+        case .nodePackages: "shippingbox.circle.fill"
         case .fvm: "shippingbox.fill"
         case .gradle: "gearshape.arrow.triangle.2.circlepath"
         case .analyze: "internaldrive"
@@ -61,6 +67,10 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
             "扫描 node_modules、target、.build 等项目构建产物，按需清理（对应 mo purge）。"
         case .installers:
             "扫描 .dmg、.pkg、.zip 等安装包文件，清理占用空间（对应 mo installer）。"
+        case .homebrew:
+            "管理通过 Homebrew 安装的命令行工具与桌面应用，查看详情，一键更新与卸载。"
+        case .nodePackages:
+            "管理通过 npm 与 pnpm 全局安装的软件包与 CLI 工具，查看详细概况、一键更新与卸载。"
         case .fvm:
             "扫描 FVM 安装的 Flutter 版本及本机 Flutter 项目引用，智能识别闲置版本并安全清理。"
         case .gradle:

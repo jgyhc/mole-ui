@@ -15,6 +15,8 @@ struct SidebarView: View {
                 SidebarRow(section: .uninstall)
                 SidebarRow(section: .purge)
                 SidebarRow(section: .installers)
+                SidebarRow(section: .homebrew)
+                SidebarRow(section: .nodePackages)
                 SidebarRow(section: .fvm)
                 SidebarRow(section: .gradle)
             }

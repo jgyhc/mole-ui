@@ -29,6 +29,8 @@ public struct ContentView: View {
         case .uninstall: UninstallView()
         case .purge: PurgeView()
         case .installers: InstallersView()
+        case .homebrew: BrewView()
+        case .nodePackages: NodePackageView()
         case .fvm: FVMView()
         case .gradle: GradleView()
         case .analyze: AnalyzeView()
