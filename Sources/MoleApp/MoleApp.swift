@@ -29,8 +29,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 通过 `swift run` 直接运行时没有 app bundle，确保以常规应用方式激活
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        #if DEBUG
         setupSnapshotIfRequested()
         setupLayoutProbeIfRequested()
+        #endif
     }
 
     #if DEBUG
