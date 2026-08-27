@@ -1,15 +1,33 @@
 import SwiftUI
 
+/// 进程监控页面顶部分页切换。
+private enum ProcessTab: String, CaseIterable {
+    case processes = "进程监控"
+    case memory = "内存监控"
+}
+
 /// 独立进程监控页面：支持全量系统进程监控、搜索、多维排序与结束进程管理。
+/// 内置内存监控子模块，通过顶部 Picker 切换。
 struct ProcessesView: View {
     @StateObject private var viewModel = ProcessesViewModel()
     @State private var hoveredPid: Int32?
+    @State private var selectedTab: ProcessTab = .processes
 
     var body: some View {
         VStack(spacing: 16) {
-            headerStatsCard
-            filterAndSearchToolbar
-            processListView
+            tabPicker
+
+            if selectedTab == .memory {
+                MemoryMonitorView(
+                    processes: viewModel.allProcesses,
+                    memorySnapshot: viewModel.memorySnapshot
+                )
+            } else {
+                headerStatsCard
+                filterAndSearchToolbar
+                javaActionsCard
+                processListView
+            }
         }
         .padding(20)
         .navigationTitle("进程监控")
@@ -34,6 +52,23 @@ struct ProcessesView: View {
                 }
                 .help(viewModel.isPaused ? "继续定时采样" : "暂停定时采样")
             }
+        }
+        .sheet(item: $viewModel.javaDetails) { details in
+            JavaProcessDetailsView(details: details)
+                .frame(minWidth: 620, minHeight: 460)
+        }
+        .alert(
+            "确认清理不活跃 Java 进程？",
+            isPresented: $viewModel.showInactiveJavaConfirmation
+        ) {
+            Button("取消", role: .cancel) {
+                viewModel.cancelInactiveJavaCleanup()
+            }
+            Button("正常退出", role: .destructive) {
+                viewModel.terminateInactiveJavaProcesses()
+            }
+        } message: {
+            Text("将尝试正常退出 \(viewModel.inactiveJavaCandidates.count) 个 Java 进程。仅包含：父进程已退出/被 launchd 接管、无监听端口、近期无 CPU 活动的进程。")
         }
         .alert(
             "确认结束进程？",
@@ -67,6 +102,22 @@ struct ProcessesView: View {
             }
         } message: {
             Text(viewModel.terminateErrorMessage ?? "")
+        }
+    }
+
+    // MARK: - 顶部分页切换
+
+    private var tabPicker: some View {
+        HStack {
+            Picker("", selection: $selectedTab) {
+                ForEach(ProcessTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 200)
+
+            Spacer()
         }
     }
 
@@ -217,6 +268,44 @@ struct ProcessesView: View {
         }
     }
 
+    private var javaActionsCard: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "cup.and.saucer.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Java 进程专项管理")
+                    .font(.headline)
+                Text("共 \(viewModel.javaProcesses.count) 个；详情会检查启动命令、工作目录、父进程链和监听端口")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                viewModel.inspectInactiveJavaProcesses()
+            } label: {
+                Label("一键清理不活跃 Java", systemImage: "wand.and.stars")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(viewModel.isInspectingJava || viewModel.javaProcesses.isEmpty)
+            Button {
+                viewModel.filterKind = .java
+            } label: {
+                Label("查看 Java", systemImage: "list.bullet")
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(14)
+        .cardBackground()
+        .overlay(alignment: .bottomLeading) {
+            if viewModel.isInspectingJava {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.leading, 14)
+                    .padding(.bottom, 3)
+            }
+        }
+    }
+
     // MARK: - 进程列表
 
     private var processListView: some View {
@@ -232,7 +321,7 @@ struct ProcessesView: View {
                 Text("物理内存")
                     .frame(width: 100, alignment: .trailing)
                 Text("操作")
-                    .frame(width: 70, alignment: .center)
+                    .frame(width: 90, alignment: .center)
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.tertiary)
@@ -326,6 +415,17 @@ struct ProcessesView: View {
 
             // 操作按钮
             HStack {
+                if proc.isJava {
+                    Button {
+                        viewModel.inspectJava(proc)
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 14))
+                            .foregroundStyle(isHovered ? Color.accentColor : Color.secondary.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                    .help("查看 Java 来源、父进程、工作目录和监听端口")
+                }
                 Button {
                     viewModel.processToTerminate = proc
                 } label: {
@@ -336,7 +436,7 @@ struct ProcessesView: View {
                 .buttonStyle(.plain)
                 .help("结束此进程")
             }
-            .frame(width: 70, alignment: .center)
+            .frame(width: 90, alignment: .center)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 7)
@@ -346,6 +446,12 @@ struct ProcessesView: View {
         )
         .onHover { hovering in
             hoveredPid = hovering ? proc.pid : nil
+        }
+        .contextMenu {
+            if proc.isJava {
+                Button("查看 Java 详情") { viewModel.inspectJava(proc) }
+            }
+            Button("结束进程", role: .destructive) { viewModel.processToTerminate = proc }
         }
     }
 

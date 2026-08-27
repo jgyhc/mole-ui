@@ -16,6 +16,7 @@ enum ProcessFilterKind: String, CaseIterable, Identifiable {
     case all = "全部进程"
     case highCPU = "高 CPU 占用"
     case highMemory = "高内存占用"
+    case java = "Java 进程"
 
     var id: String { rawValue }
 }
@@ -35,6 +36,10 @@ final class ProcessesViewModel: ObservableObject {
     // 终止进程确认弹窗状态
     @Published var processToTerminate: ProcessMetrics.Usage?
     @Published var terminateErrorMessage: String?
+    @Published var javaDetails: ProcessMetrics.JavaProcessDetails?
+    @Published var isInspectingJava = false
+    @Published var showInactiveJavaConfirmation = false
+    @Published private(set) var memorySnapshot: MemoryMetrics.Snapshot?
 
     private var prevProcessTimes: [Int32: UInt64] = [:]
     private var lastSampleDate = Date()
@@ -58,6 +63,8 @@ final class ProcessesViewModel: ObservableObject {
             list = list.filter { $0.cpuPercent >= 5.0 }
         case .highMemory:
             list = list.filter { $0.memoryBytes >= 100 * 1024 * 1024 } // >= 100MB
+        case .java:
+            list = list.filter(\.isJava)
         }
 
         // 文本搜索
@@ -113,6 +120,61 @@ final class ProcessesViewModel: ObservableObject {
         sampleProcesses()
     }
 
+    var javaProcesses: [ProcessMetrics.Usage] {
+        allProcesses.filter(\.isJava)
+    }
+
+    func inspectJava(_ process: ProcessMetrics.Usage) {
+        isInspectingJava = true
+        Task.detached(priority: .utility) { [weak self] in
+            let details = ProcessMetrics.inspectJavaProcess(process)
+            await MainActor.run {
+                self?.javaDetails = details
+                self?.isInspectingJava = false
+            }
+        }
+    }
+
+    func inspectInactiveJavaProcesses() {
+        guard !javaProcesses.isEmpty else {
+            javaDetails = nil
+            return
+        }
+        isInspectingJava = true
+        let processes = javaProcesses
+        Task.detached(priority: .utility) { [weak self] in
+            let details = processes.map(ProcessMetrics.inspectJavaProcess)
+            let inactive = details.filter(\.isInactive)
+            await MainActor.run {
+                self?.isInspectingJava = false
+                self?.inactiveJavaCandidates = inactive
+                self?.showInactiveJavaConfirmation = !inactive.isEmpty
+            }
+        }
+    }
+
+    @Published private(set) var inactiveJavaCandidates: [ProcessMetrics.JavaProcessDetails] = []
+
+    func cancelInactiveJavaCleanup() {
+        inactiveJavaCandidates = []
+        showInactiveJavaConfirmation = false
+    }
+
+    func terminateInactiveJavaProcesses() {
+        let candidates = inactiveJavaCandidates
+        var terminated = 0
+        for candidate in candidates where ProcessMetrics.terminate(pid: candidate.pid) {
+            allProcesses.removeAll { $0.pid == candidate.pid }
+            OperationLog.append(module: "process", "清理不活跃 Java 进程：\(candidate.name) (PID: \(candidate.pid))")
+            terminated += 1
+        }
+        inactiveJavaCandidates = []
+        showInactiveJavaConfirmation = false
+        if terminated == 0 && !candidates.isEmpty {
+            terminateErrorMessage = "未能清理检测到的不活跃 Java 进程，可能需要管理员权限或进程已退出。"
+        }
+    }
+
     /// 终止选中的进程
     func terminateProcess(_ process: ProcessMetrics.Usage, force: Bool = false) {
         let success = ProcessMetrics.terminate(pid: process.pid, force: force)
@@ -130,6 +192,8 @@ final class ProcessesViewModel: ObservableObject {
         let elapsed = now.timeIntervalSince(lastSampleDate)
         lastSampleDate = now
 
+        memorySnapshot = MemoryMetrics.snapshot()
+
         let samples = ProcessMetrics.sample()
         let usages = samples.map { sample in
             ProcessMetrics.Usage(
@@ -140,7 +204,9 @@ final class ProcessesViewModel: ObservableObject {
                     currTime: sample.cpuTime,
                     elapsed: elapsed
                 ),
-                memoryBytes: sample.residentSize
+                memoryBytes: sample.residentSize,
+                parentPID: sample.parentPID,
+                startDate: sample.startDate
             )
         }
 
